@@ -1,0 +1,83 @@
+diff --git a/librtmp/include/rtmp-client.h b/librtmp/include/rtmp-client.h
+index 50e6805..b233311 100644
+--- a/librtmp/include/rtmp-client.h
++++ b/librtmp/include/rtmp-client.h
+@@ -24,6 +24,11 @@ struct rtmp_client_handler_t
+ 	int (*onvideo)(void* param, const void* video, size_t bytes, uint32_t timestamp);
+ 	int (*onaudio)(void* param, const void* audio, size_t bytes, uint32_t timestamp);
+ 	int (*onscript)(void* param, const void* script, size_t bytes, uint32_t timestamp);
++
++	///[OPTIONAL] server onStatus/_error notification, e.g. NetStream.Publish.Start, NetStream.Publish.BadName
++	///@param[in] level status/warning/error
++	///@return 0-ok, other-error (rtmp_client_input returns this value)
++	int (*onstatus)(void* param, const char* level, const char* code, const char* description);
+ };
+ 
+ /// URL: rtmp://host/app/playpath (TCURL: rtmp://host/app)
+diff --git a/librtmp/include/rtmp-internal.h b/librtmp/include/rtmp-internal.h
+index 7e49743..ffc60e4 100644
+--- a/librtmp/include/rtmp-internal.h
++++ b/librtmp/include/rtmp-internal.h
+@@ -152,6 +152,7 @@ struct rtmp_t
+         int (*oneof)(void* param, uint32_t stream_id); // EOF event
+ 		int (*onping)(void* param, uint32_t stream_id); // send pong
+ 		int (*onbandwidth)(void* param); // send window acknowledgement size
++		int (*onstatus)(void* param, const char* level, const char* code, const char* description); // [OPTIONAL] onStatus/_error
+ 
+ 		// enhanced rtmp v2
+ 		// 1. rtmp://foo.mydomain.com:1935/realtimeapp
+diff --git a/librtmp/source/rtmp-client-invoke-handler.h b/librtmp/source/rtmp-client-invoke-handler.h
+index 096e3cd..add0c9a 100644
+--- a/librtmp/source/rtmp-client-invoke-handler.h
++++ b/librtmp/source/rtmp-client-invoke-handler.h
+@@ -177,6 +177,13 @@ static int rtmp_command_onstatus(struct rtmp_t* rtmp, double transaction, const
+ 		|| 0 == strcmp(RTMP_LEVEL_WARNING, result.level)
+ 		|| 0 == strcmp(RTMP_LEVEL_FINISH, result.level));
+ 
++	if (rtmp->client.onstatus)
++	{
++		int r = rtmp->client.onstatus(rtmp->param, result.level, result.code, result.description);
++		if (0 != r)
++			return r;
++	}
++
+ 	if (0 == strcasecmp(result.code, "NetStream.Play.Start") 
+ 		|| 0 == strcasecmp(result.code, "NetStream.Record.Start")
+ 		|| 0 == strcasecmp(result.code, "NetStream.Publish.Start"))
+@@ -226,9 +233,7 @@ static int rtmp_command_onstatus(struct rtmp_t* rtmp, double transaction, const
+ 	}
+ 	else
+ 	{
+-		assert(0);
+-		printf("%s: level: %s, code: %s, description: %s\n", __FUNCTION__, result.level, result.code, result.description);
+-		return 0;
++		// unknown code (e.g. NetStream.Unpublish.Success): reported through onstatus only
+ 	}
+ 
+ 	(void)transaction;
+diff --git a/librtmp/source/rtmp-client.c b/librtmp/source/rtmp-client.c
+index 562ba3a..ef9c604 100644
+--- a/librtmp/source/rtmp-client.c
++++ b/librtmp/source/rtmp-client.c
+@@ -310,6 +310,13 @@ static int rtmp_client_onbandwidth(void* param)
+ 	return rtmp_client_send_server_bandwidth(ctx);
+ }
+ 
++static int rtmp_client_onstatus(void* param, const char* level, const char* code, const char* description)
++{
++	struct rtmp_client_t* ctx;
++	ctx = (struct rtmp_client_t*)param;
++	return ctx->handler.onstatus ? ctx->handler.onstatus(ctx->param, level, code, description) : 0;
++}
++
+ static void rtmp_client_onabort(void* param, uint32_t chunk_stream_id)
+ {
+ 	struct rtmp_client_t* ctx;
+@@ -380,6 +387,7 @@ struct rtmp_client_t* rtmp_client_create(const char* appname, const char* playpa
+ 	ctx->rtmp.client.onping = rtmp_client_onping;
+     ctx->rtmp.client.oneof = rtmp_client_oneof;
+ 	ctx->rtmp.client.onbandwidth = rtmp_client_onbandwidth;
++	ctx->rtmp.client.onstatus = rtmp_client_onstatus;
+ 
+ 	snprintf(ctx->connect.app, sizeof(ctx->connect.app) - 1, "%s", appname);
+ 	if (tcurl) snprintf(ctx->connect.tcUrl, sizeof(ctx->connect.tcUrl) - 1, "%s", tcurl);

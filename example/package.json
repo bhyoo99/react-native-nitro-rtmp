@@ -1,0 +1,26 @@
+{
+  "name": "react-native-nitro-rtmp-example",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "expo": "~57.0.22",
+    "expo-asset": "~57.0.17",
+    "expo-file-system": "~57.0.7",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-nitro-modules": "^0.37.1"
+  },
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "build:ios": "xcodebuild ONLY_ACTIVE_ARCH=YES -workspace ios/NitroRtmpExample.xcworkspace -UseNewBuildSystem=YES -scheme NitroRtmpExample -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build -quiet",
+    "build:android": "cd android && ./gradlew assembleDebug -DtestBuildType=debug -Dorg.gradle.jvmargs=-Xmx4g"
+  },
+  "private": true,
+  "devDependencies": {
+    "react-native-builder-bob": "^0.43.1",
+    "react-native-monorepo-config": "^0.4.0"
+  }
+}

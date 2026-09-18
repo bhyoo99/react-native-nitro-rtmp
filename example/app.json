@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "NitroRtmp Example",
+    "slug": "react-native-nitro-rtmp-example",
+    "version": "1.0.0",
+    "platforms": ["ios", "android"],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "nitrortmp.example",
+      "infoPlist": {
+        "NSCameraUsageDescription": "The example streams the camera over RTMP.",
+        "NSMicrophoneUsageDescription": "The example streams the microphone over RTMP."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "nitrortmp.example",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    }
+  }
+}

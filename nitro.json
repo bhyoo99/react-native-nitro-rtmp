@@ -1,0 +1,79 @@
+{
+  "cxxNamespace": [
+    "nitrortmp"
+  ],
+  "ios": {
+    "iosModuleName": "NitroRtmp"
+  },
+  "android": {
+    "androidNamespace": [
+      "nitrortmp"
+    ],
+    "androidCxxLibName": "nitrortmp"
+  },
+  "autolinking": {
+    "RtmpPublisher": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridRtmpPublisher"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridRtmpPublisher"
+      }
+    },
+    "Mixer": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridMixer"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridMixer"
+      }
+    },
+    "CameraSource": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridCameraSource"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridCameraSource"
+      }
+    },
+    "MicrophoneSource": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridMicrophoneSource"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridMicrophoneSource"
+      }
+    },
+    "ImageLayer": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridImageLayer"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridImageLayer"
+      }
+    },
+    "PreviewView": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridPreviewView"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridPreviewView"
+      }
+    }
+  },
+  "ignorePaths": [
+    "node_modules"
+  ]
+}
