@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-rtmp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "RTMP/RTMPS live streaming for React Native: camera, microphone, overlay layers and hardware H.264/AAC encoding on Nitro Modules",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
