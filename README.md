@@ -1,3 +1,5 @@
+![Nitro RTMP — Live streaming for React Native](.github/assets/readme-banner.png)
+
 # react-native-nitro-rtmp
 
 Live video streaming over RTMP and RTMPS for React Native, built on [Nitro Modules](https://nitro.margelo.com/).
