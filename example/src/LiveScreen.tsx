@@ -2,8 +2,6 @@ import { Asset } from 'expo-asset';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
-  PermissionsAndroid,
-  Platform,
   StyleSheet,
   Switch,
   Text,
@@ -11,18 +9,12 @@ import {
   View,
 } from 'react-native';
 import {
-  createCameraSource,
   createImageLayer,
-  createMicrophoneSource,
-  createMixer,
-  createPublisher,
-  PreviewView,
-  toCaptureError,
-  toPublisherError,
-  type CameraPosition,
-  type MixerStats,
+  RtmpPreview,
+  useRtmpStream,
+  type ImageLayer,
+  type Mixer,
   type PublisherState,
-  type PublisherStats,
 } from 'react-native-nitro-rtmp';
 
 import watermarkAsset from '../assets/watermark.png';
@@ -37,62 +29,43 @@ import {
   type ScriptedAction,
 } from './env';
 
-/** Top-right corner, output-frame coordinates. */
 const WATERMARK_FRAME = { x: 0.7, y: 0.05, width: 0.25, height: 0.1 };
-const STATS_INTERVAL_MS = 500;
 const SCENARIO_GAP_MS = 3000;
-
 const ACTIVE_STATES: readonly PublisherState[] = [
   'connecting',
   'connected',
   'publishing',
 ];
 
-/**
- * The live screen: camera + microphone through the mixer,
- * the preview shows the composited scene, the watermark is an `ImageLayer`
- * that is only added to and removed from the mixer.
- */
 export default function LiveScreen({
   onSwitchToFixture,
 }: {
   onSwitchToFixture: () => void;
 }) {
-  // Native objects live for the screen's lifetime.
-  const nativeRef = useRef<{
-    publisher: ReturnType<typeof createPublisher>;
-    mixer: ReturnType<typeof createMixer>;
-    camera: ReturnType<typeof createCameraSource>;
-    mic: ReturnType<typeof createMicrophoneSource>;
-    watermark: ReturnType<typeof createImageLayer>;
-  } | null>(null);
-  if (nativeRef.current === null) {
-    nativeRef.current = {
-      publisher: createPublisher(),
-      mixer: createMixer(),
-      camera: createCameraSource(),
-      mic: createMicrophoneSource(),
-      watermark: createImageLayer(),
-    };
-  }
-  const { publisher, mixer, camera, mic, watermark } = nativeRef.current;
-
+  const stream = useRtmpStream({ statsIntervalMs: 500 });
+  const {
+    state,
+    ready,
+    isBusy: busy,
+    camera: position,
+    muted,
+    error,
+    stats,
+    mixer,
+    start: startPublishing,
+    stop: stopPublishing,
+    flipCamera: flip,
+    setMuted,
+  } = stream;
+  const publisherStats = stats?.publisher;
+  const mixerStats = stats?.mixer;
+  const lastError = error ? `${error.code}: ${error.message}` : '';
   const [url, setUrl] = useState(INITIAL_URL);
-  const [state, setState] = useState<PublisherState>('idle');
-  const [lastError, setLastError] = useState('');
-  const [ready, setReady] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [position, setPosition] = useState<CameraPosition>('back');
-  const [muted, setMuted] = useState(false);
   const [watermarkOn, setWatermarkOn] = useState(false);
   const [watermarkLoaded, setWatermarkLoaded] = useState(false);
-  const [publisherStats, setPublisherStats] = useState<PublisherStats | null>(
-    null
-  );
-  const [mixerStats, setMixerStats] = useState<MixerStats | null>(null);
   const [encodeFps, setEncodeFps] = useState(0);
   const [log, setLog] = useState<string[]>([]);
-  const autoStartedRef = useRef(false);
+  const watermarkRef = useRef<{ mixer: Mixer; layer: ImageLayer } | null>(null);
   const lastEncodedRef = useRef({ frames: 0, at: Date.now() });
 
   const append = useCallback((line: string) => {
@@ -100,182 +73,108 @@ export default function LiveScreen({
     setLog((previous) => [...previous.slice(-7), `${timestamp()} ${line}`]);
   }, []);
 
-  // Session callbacks and the stats poll.
   useEffect(() => {
-    publisher.onStateChange((next) => {
-      setState(next);
-      append(`state: ${next}`);
-    });
-    publisher.onError((error) => {
-      setLastError(`${error.code}: ${error.message}`);
-      append(`onError ${error.code}: ${error.message}`);
-    });
-    mixer.onError((error) => {
-      setLastError(`${error.code}: ${error.message}`);
-      append(`mixer error ${error.code}: ${error.message}`);
-    });
-    const timer = setInterval(() => {
-      setPublisherStats(publisher.stats);
-      const stats = mixer.stats;
-      setMixerStats(stats);
-      const now = Date.now();
-      const previous = lastEncodedRef.current;
-      const seconds = (now - previous.at) / 1000;
-      if (seconds > 0) {
-        setEncodeFps((stats.encodedVideoFrames - previous.frames) / seconds);
-      }
-      lastEncodedRef.current = { frames: stats.encodedVideoFrames, at: now };
-    }, STATS_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [publisher, mixer, append]);
+    append(`state: ${state}`);
+  }, [state, append]);
+  useEffect(() => {
+    if (error) append(`error ${error.code}: ${error.message}`);
+  }, [error, append]);
+  useEffect(() => {
+    const now = Date.now();
+    const previous = lastEncodedRef.current;
+    const frames = mixerStats?.encodedVideoFrames ?? 0;
+    const seconds = (now - previous.at) / 1000;
+    setEncodeFps(
+      seconds > 0 && frames >= previous.frames
+        ? (frames - previous.frames) / seconds
+        : 0
+    );
+    lastEncodedRef.current = { frames, at: now };
+  }, [mixerStats]);
 
-  // Scene setup: permissions, camera + microphone, layers, the session link.
+  // Advanced composition still uses the existing layer API on the hook-owned mixer.
   useEffect(() => {
+    setWatermarkLoaded(false);
+    setWatermarkOn(false);
+    if (!mixer) return;
     let cancelled = false;
-    const setup = async () => {
-      if (Platform.OS === 'android') {
-        // The library only checks permissions on Android.
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        ]);
-        append(`permissions: ${JSON.stringify(granted)}`);
-      }
-      mixer.video = {
-        width: 720,
-        height: 1280,
-        frameRate: 30,
-        bitrateKbps: 2500,
-        keyframeIntervalSeconds: 2,
-      };
-      mixer.audio = { sampleRate: 48000, channels: 1, bitrateKbps: 128 };
-      mixer.addLayer(camera);
-      mixer.setAudioSource(mic);
-      publisher.setMixer(mixer);
-      publisher.setMetadata({
-        width: 720,
-        height: 1280,
-        frameRate: 30,
-        videoBitrateKbps: 2500,
-        audioSampleRate: 48000,
-        audioChannels: 1,
-        audioBitrateKbps: 128,
-      });
-      try {
-        await camera.start();
-        append('camera started');
-      } catch (error: unknown) {
-        const failure = toCaptureError(error);
-        setLastError(`${failure.code}: ${failure.message}`);
-        append(`camera.start() rejected ${failure.code}: ${failure.message}`);
-      }
-      try {
-        await mic.start();
-        append('microphone started');
-      } catch (error: unknown) {
-        const failure = toCaptureError(error);
-        setLastError(`${failure.code}: ${failure.message}`);
-        append(`mic.start() rejected ${failure.code}: ${failure.message}`);
-      }
-      try {
-        const asset = Asset.fromModule(watermarkAsset);
-        await asset.downloadAsync();
-        const uri = asset.localUri ?? asset.uri;
-        await watermark.load(uri);
-        if (cancelled) {
-          return;
-        }
-        setWatermarkLoaded(true);
-        append('watermark loaded');
-        if (INITIAL_WATERMARK) {
-          mixer.addLayer(watermark, WATERMARK_FRAME);
-          setWatermarkOn(true);
-        }
-      } catch (error: unknown) {
-        const failure = toCaptureError(error);
-        append(`watermark failed ${failure.code}: ${failure.message}`);
-      }
-      if (!cancelled) {
-        setReady(true);
-      }
+    const watermark = createImageLayer();
+    const load = async () => {
+      const asset = Asset.fromModule(watermarkAsset);
+      await asset.downloadAsync();
+      if (cancelled) return;
+      await watermark.load(asset.localUri ?? asset.uri);
+      if (cancelled) return;
+      watermarkRef.current = { mixer, layer: watermark };
+      if (INITIAL_WATERMARK) mixer.addLayer(watermark, WATERMARK_FRAME);
+      setWatermarkOn(INITIAL_WATERMARK);
+      setWatermarkLoaded(true);
+      append('watermark loaded');
     };
-    setup();
+    load().catch((failure: unknown) => {
+      if (!cancelled) append(`watermark failed: ${String(failure)}`);
+    });
     return () => {
       cancelled = true;
-      publisher.setMixer(undefined);
-      publisher.stop();
-      camera.stop();
-      mic.stop();
+      watermarkRef.current = null;
+      mixer.removeLayer(watermark);
     };
-  }, [publisher, mixer, camera, mic, watermark, append]);
+  }, [mixer, append]);
 
   const start = useCallback(
     async (target: string) => {
-      setBusy(true);
-      setLastError('');
       try {
-        await publisher.start(target);
+        await startPublishing(target);
         append('start() resolved');
-      } catch (error: unknown) {
-        const failure = toPublisherError(error);
-        setLastError(`${failure.code}: ${failure.message}`);
-        append(`start() rejected ${failure.code}: ${failure.message}`);
-      } finally {
-        setBusy(false);
+        return true;
+      } catch (failure: unknown) {
+        append(`start() rejected: ${String(failure)}`);
+        return false;
       }
     },
-    [publisher, append]
+    [startPublishing, append]
   );
 
   const stop = useCallback(async () => {
-    setBusy(true);
     try {
-      await publisher.stop();
+      await stopPublishing();
       append('stop() resolved');
-    } catch (error: unknown) {
-      append(`stop() rejected: ${String(error)}`);
-    } finally {
-      setBusy(false);
+    } catch (failure: unknown) {
+      append(`stop() rejected: ${String(failure)}`);
     }
-  }, [publisher, append]);
+  }, [stopPublishing, append]);
 
   const flipCamera = useCallback(() => {
-    const next: CameraPosition = position === 'back' ? 'front' : 'back';
-    camera.position = next;
-    setPosition(next);
-    append(`camera: ${next}`);
-  }, [camera, position, append]);
+    flip();
+    append('camera flipped');
+  }, [flip, append]);
 
   const toggleMute = useCallback(
     (value: boolean) => {
-      mic.muted = value;
       setMuted(value);
       append(value ? 'muted' : 'unmuted');
     },
-    [mic, append]
+    [setMuted, append]
   );
 
-  // The overlay proof: the watermark is only added and removed.
   const toggleWatermark = useCallback(
     (value: boolean) => {
-      if (value) {
-        mixer.addLayer(watermark, WATERMARK_FRAME);
-      } else {
-        mixer.removeLayer(watermark);
-      }
+      const watermark = watermarkRef.current;
+      if (!watermark) return;
+      if (value) watermark.mixer.addLayer(watermark.layer, WATERMARK_FRAME);
+      else watermark.mixer.removeLayer(watermark.layer);
       setWatermarkOn(value);
       append(value ? 'watermark on' : 'watermark off');
     },
-    [mixer, watermark, append]
+    [append]
   );
 
-  // Scripted run: each URL for DURATION_MS with the ACTIONS in between, then stop.
   useEffect(() => {
-    if (!ready || AUTOSTART_URLS.length === 0 || autoStartedRef.current) {
-      return;
-    }
-    autoStartedRef.current = true;
+    if (!ready || AUTOSTART_URLS.length === 0) return;
+    let cancelled = false;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
     const perform = (action: ScriptedAction) => {
+      if (cancelled) return;
       append(`action: ${action}`);
       switch (action) {
         case 'flip':
@@ -297,40 +196,39 @@ export default function LiveScreen({
     };
     const run = async () => {
       for (const [index, target] of AUTOSTART_URLS.entries()) {
-        if (index > 0) {
-          await delay(SCENARIO_GAP_MS);
-        }
+        if (index > 0) await delay(SCENARIO_GAP_MS);
+        if (cancelled) return;
         setUrl(target);
         append(`scenario ${index + 1}/${AUTOSTART_URLS.length}: ${target}`);
-        await start(target);
-        if (publisher.state === 'publishing') {
-          const timers = ACTIONS.map(({ action, atMs }) =>
-            setTimeout(() => perform(action), atMs)
-          );
+        const publishing = await start(target);
+        if (cancelled) return;
+        if (publishing) {
+          ACTIONS.forEach(({ action, atMs }) => {
+            timers.add(setTimeout(() => perform(action), atMs));
+          });
           await delay(DURATION_MS);
           timers.forEach(clearTimeout);
+          timers.clear();
+          if (cancelled) return;
           await stop();
         }
       }
-      append('scenario finished');
+      if (!cancelled) append('scenario finished');
     };
-    run();
-  }, [
-    ready,
-    publisher,
-    start,
-    stop,
-    append,
-    flipCamera,
-    toggleMute,
-    toggleWatermark,
-  ]);
+    run().catch((failure: unknown) => {
+      if (!cancelled) append(`scenario failed: ${String(failure)}`);
+    });
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
+  }, [ready, start, stop, append, flipCamera, toggleMute, toggleWatermark]);
 
   const active = ACTIVE_STATES.includes(state);
 
   return (
     <View style={styles.container}>
-      <PreviewView style={styles.preview} mixer={mixer} resizeMode="cover" />
+      <RtmpPreview style={styles.preview} stream={stream} resizeMode="cover" />
       <View style={styles.top}>
         <View style={styles.row}>
           <TextInput
@@ -354,7 +252,7 @@ export default function LiveScreen({
           <Button
             title="Stop"
             onPress={() => stop()}
-            disabled={busy || !active}
+            disabled={!busy && !active}
             testID="stop"
           />
           <Button title="Flip" onPress={flipCamera} testID="flip" />

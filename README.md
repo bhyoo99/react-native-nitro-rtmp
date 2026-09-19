@@ -36,74 +36,126 @@ cd ios && pod install
 
 **iOS**: add `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` to `Info.plist` (or `expo.ios.infoPlist` in `app.json`). `camera.start()` and `mic.start()` request access and reject with `permissionDenied` when it is refused.
 
-**Android**: the library's manifest declares `CAMERA` and `RECORD_AUDIO`. Request them at runtime before calling `start()`, for example with `PermissionsAndroid.requestMultiple`; the library only checks that they were granted.
+**Android**: the library's manifest declares `CAMERA` and `RECORD_AUDIO`. `useRtmpStream` requests the permissions it needs when activated (camera only when `audio: false`). When using the low-level source factories directly, request permissions yourself before calling `start()`.
 
 ## Usage
 
-```tsx
-import { useEffect, useRef } from 'react';
-import { StyleSheet } from 'react-native';
-import {
-  createCameraSource,
-  createImageLayer,
-  createMicrophoneSource,
-  createMixer,
-  createPublisher,
-  PreviewView,
-} from 'react-native-nitro-rtmp';
+`useRtmpStream` owns the camera, microphone, mixer and publisher. It starts the preview, exposes reactive state, and stops capture and publishing on unmount. Call `start(url)` when the user is ready to go live.
 
-function createSession() {
-  return {
-    publisher: createPublisher(),
-    mixer: createMixer(),
-    camera: createCameraSource(),
-    mic: createMicrophoneSource(),
-    watermark: createImageLayer(),
-  };
-}
+```tsx
+import { Button, StyleSheet, Text, View } from 'react-native';
+import { RtmpPreview, useRtmpStream } from 'react-native-nitro-rtmp';
 
 export function Broadcast({ url }: { url: string }) {
-  // Native objects live for the component's lifetime.
-  const sessionRef = useRef<ReturnType<typeof createSession> | null>(null);
-  if (sessionRef.current === null) {
-    sessionRef.current = createSession();
-  }
-  const { publisher, mixer, camera, mic, watermark } = sessionRef.current;
-
-  useEffect(() => {
-    mixer.video = { width: 720, height: 1280, frameRate: 30, bitrateKbps: 2500 };
-    mixer.audio = { sampleRate: 48000, channels: 1, bitrateKbps: 128 };
-    mixer.addLayer(camera);
-    mixer.setAudioSource(mic);
-    publisher.setMixer(mixer);
-    publisher.onStateChange((state) => console.log('state', state));
-    publisher.onError((error) => console.warn(error.code, error.message));
-
-    (async () => {
-      await camera.start(); // the preview runs from here; the encoders wait for the session
-      await mic.start();
-      await watermark.load('file:///path/to/logo.png');
-      mixer.addLayer(watermark, { x: 0.7, y: 0.05, width: 0.25, height: 0.1 });
-      await publisher.start(url); // resolves once the server accepted the publish
-    })().catch(console.warn);
-
-    return () => {
-      publisher.setMixer(undefined);
-      publisher.stop();
-      camera.stop();
-      mic.stop();
-    };
-  }, [publisher, mixer, camera, mic, watermark, url]);
+  const stream = useRtmpStream({ camera: 'back', audio: true });
 
   return (
-    <PreviewView mixer={mixer} resizeMode="cover" style={StyleSheet.absoluteFill} />
+    <View style={{ flex: 1 }}>
+      <RtmpPreview stream={stream} style={StyleSheet.absoluteFill} />
+      <Button
+        title="Go live"
+        disabled={
+          !stream.ready || stream.isBusy || stream.state === 'publishing'
+        }
+        onPress={() => void stream.start(url).catch(console.warn)}
+      />
+      <Button
+        title="Stop"
+        onPress={() => void stream.stop().catch(console.warn)}
+      />
+      <Button title="Flip camera" onPress={stream.flipCamera} />
+      <Text>{stream.error?.message}</Text>
+    </View>
   );
 }
 ```
 
-While live: `camera.position = 'front'` switches the camera, `mic.muted = true` sends silence, `mixer.removeLayer(watermark)` takes the overlay off, and `publisher.stats` / `mixer.stats` report counters.
+`stop()` stops publishing while keeping the preview running, and cancels an in-flight `start()`. Pass `active: false` to stop both capture and publishing. For navigation, pass your screen's focus state as `active`; also include app foreground state if capture should stop in the background. Activation requests camera/microphone access, so use `active: false` until you want to ask for permission. React Strict Mode and rapid deactivation/reactivation are handled by waiting for the previous capture session to finish shutting down.
+
+### Controls and state
+
+```tsx
+stream.setMuted(true); // Keeps the audio timeline, sends silence
+stream.setCameraPosition('front'); // Switches camera while previewing or live
+stream.flipCamera();
+
+// These values update React automatically:
+stream.ready;
+stream.state;
+stream.isBusy;
+stream.error;
+stream.camera;
+stream.muted;
+```
+
+`start(url)` waits for capture readiness and resolves when publishing. `start()` and `stop()` return promises; handle their rejections in event handlers. Capture and transport failures also appear in `stream.error` as `RtmpCaptureError` or `RtmpPublisherError`. A cancelled or inactive start rejects with `notReady`. A capture startup failure releases any partially started resources; fix the cause and toggle `active` off/on to retry. Stopping a stream does not revoke its permissions.
+
+### Configuration
+
+```tsx
+const stream = useRtmpStream({
+  active: isFocused,
+  camera: 'back',
+  audio: true,
+  video: { width: 720, height: 1280, frameRate: 30, bitrateKbps: 2500 },
+  statsIntervalMs: 1000,
+});
+
+// Populated only when stats polling is enabled and capture is ready.
+stream.stats?.publisher.bytesSent;
+stream.stats?.mixer.droppedFrames;
+```
+
+| Option            | Default                                           | Behavior                                                                             |
+| ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `active`          | `true`                                            | Enables capture/preview; `false` stops capture and publishing                        |
+| `camera`          | `'back'`                                          | Initial camera; changing this prop switches the camera without restarting the stream |
+| `audio`           | `true`                                            | Enables the microphone; `false` requires only camera permission                      |
+| `video`           | 720 × 1280, 30 fps, 2500 kbps, 2-second keyframes | Partial `VideoSettings`; dimensions must be positive even integers                   |
+| `audioSettings`   | 48000 Hz, 1 channel, 128 kbps                     | Partial `AudioSettings`; capture supports 48000 Hz and 1 or 2 channels               |
+| `statsIntervalMs` | `0`                                               | Opt-in stats polling; `0` disables it                                                |
+
+Changing video/audio configuration or the stats interval recreates the capture session and stops any current broadcast; call `start()` again to resume publishing. Passing a new options object with unchanged values does not restart it. Camera changes and mute controls apply without recreating capture. Only one hook should own a device's camera/microphone at a time.
+
+### Image overlays and advanced composition
+
+The hook exposes `stream.mixer` for the existing layer API. It is `undefined` before initialization and while inactive, and is replaced when the capture session is recreated. Attach custom layers in an effect that depends on this mixer, and remove them in cleanup:
+
+```tsx
+import { useEffect } from 'react';
+import { createImageLayer } from 'react-native-nitro-rtmp';
+
+const { mixer } = stream;
+useEffect(() => {
+  if (!mixer) return;
+  let cancelled = false;
+  const image = createImageLayer();
+  void image
+    .load(imageFileUri)
+    .then(() => {
+      if (!cancelled) {
+        mixer.addLayer(image, { x: 0.7, y: 0.05, width: 0.25, height: 0.1 });
+      }
+    })
+    .catch(console.warn);
+  return () => {
+    cancelled = true;
+    mixer.removeLayer(image);
+  };
+}, [mixer, imageFileUri]);
+```
+
+The mixer is owned by the hook: use it to manage your additional layers, and configure capture through hook options. For custom encoder input or full control over resource ownership, the original factories and `PreviewView` remain available unchanged. See the API below and the [fixture example](example/src/FixtureScreen.tsx).
 
 ## API
+
+### `useRtmpStream(options?): RtmpStream`
+
+Returns the reactive state and controls described above. Native capture starts after mounting, never during render. Preview activation and publishing are separate; activation does not automatically connect to an RTMP server.
+
+### `RtmpPreview`
+
+Props: `stream`, `resizeMode` (`'cover'` or `'contain'`) and the same view props as `PreviewView`. Renders the hook-owned mixer's composition. Multiple previews may display the same stream.
 
 ### `createPublisher(): RtmpPublisher`
 
