@@ -251,6 +251,24 @@ scripts/verify-stream.sh --listen --width 720 --height 1280 --fps 30 --duration 
 
 starts `ffmpeg -listen`, waits for one publish and checks codecs, size, frame rate, keyframe interval, timestamp monotonicity, A/V alignment and a clean decode. The example app reads `EXPO_PUBLIC_*` variables (see `example/src/env.ts`) to start automatically and to switch cameras, mute and toggle the watermark on a schedule.
 
+## Migrating from 0.3
+
+0.3 captured the camera itself; this version plugs into VisionCamera instead.
+
+1. Install `react-native-vision-camera` and `react-native-nitro-image`, add VisionCamera's camera permission setup, and rebuild the native apps (`pod install`, Gradle sync).
+2. Render a VisionCamera `<Camera>` (or call `useCamera`) and pass `stream.cameraOutput` in its `outputs`. Nothing streams until the camera session runs with that output.
+3. Replace the removed hook API:
+
+| 0.3 | Now |
+| --- | --- |
+| `useRtmpStream({ camera: 'front' })` | `useCameraDevice('front')` and the `device` prop of `<Camera>` |
+| `stream.camera`, `stream.flipCamera()`, `stream.setCameraPosition()` | Change `device`; the stream keeps running |
+| Camera permission requested by the hook | `useCameraPermission()` from VisionCamera; the hook requests the microphone only |
+| `video.frameRate` sets the camera frame rate | It sets the encoder's; give `<Camera>` `constraints={[{ fps: 30 }]}` |
+| `createCameraSource()`, `camera.start()` / `stop()` | `createCameraLayer()`; VisionCamera starts and stops the output |
+
+`RtmpPreview`, `PreviewView`, the mixer, image layers, the microphone and the publisher keep their APIs. The native view is registered as `RtmpPreviewView` now, which only matters if you referenced the Fabric component name directly.
+
 ## Third-party code
 
 `cpp/third_party/media-server` vendors [ireader/media-server](https://github.com/ireader/media-server) and [ireader/sdk](https://github.com/ireader/sdk) (MIT) with one patch that adds an `onStatus` callback to the RTMP client. See `cpp/third_party/media-server/UPSTREAM.md` and `scripts/sync-media-server.sh`.

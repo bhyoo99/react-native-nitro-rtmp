@@ -36,7 +36,20 @@ To invoke **Nitrogen**, use the following command:
 yarn nitrogen
 ```
 
-The [example app](/example/) demonstrates usage of the library. You need to run it to test any changes you make.
+### VisionCamera
+
+The camera comes from [VisionCamera](https://github.com/mrousavy/react-native-vision-camera) 5: `CameraLayer.output` is a VisionCamera `CameraOutput`, built on its public Swift (`ios/Public/`) and Kotlin (`public/`) output protocols and on the C++ specs it publishes (CocoaPods public headers, Gradle prefab). Keep to those public surfaces; the private bridge classes are not available to other packages. Nitrogen reads VisionCamera's `CameraOutput` spec from the root `node_modules`, so run `yarn` before `yarn nitrogen`. `nitro.json` ignores `**/node_modules`; without that pattern Nitrogen also generates VisionCamera's and NitroImage's HybridObjects from `example/node_modules` and the Android build ends up with duplicate classes.
+
+To compile only the library's native code without running the whole example app:
+
+```sh
+# iOS: the NitroRtmp pod target and its dependencies (after `pod install` in example/ios)
+cd example/ios && xcodebuild -project Pods/Pods.xcodeproj -target NitroRtmp -sdk iphonesimulator -configuration Debug SYMROOT="$PWD/build/PodsOnly"
+# Android: the library module through the example's Gradle project
+cd example/android && ./gradlew :react-native-nitro-rtmp:assembleDebug
+```
+
+The [example app](/example/) demonstrates usage of the library. You need to run it to test any changes you make. Streaming from the camera needs a physical device, because VisionCamera has no camera on the iOS simulator; the fixture screen streams a pre-encoded clip there.
 
 It is configured to use the local version of the library, so any changes you make to the library's source code will be reflected in the example app. Changes to the library's JavaScript code will be reflected in the example app without a rebuild, but native code changes will require a rebuild of the example app.
 
