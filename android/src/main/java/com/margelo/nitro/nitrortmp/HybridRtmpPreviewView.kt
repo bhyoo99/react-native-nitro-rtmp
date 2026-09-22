@@ -9,20 +9,20 @@ import com.facebook.react.uimanager.ThemedReactContext
 import com.margelo.nitro.nitrortmp.mixer.VideoMixer
 
 /**
- * The `PreviewView` HybridView: a `TextureView` the
- * mixer draws the composited scene into (front camera mirrored there only).
+ * The `RtmpPreviewView` HybridView: a `TextureView` the
+ * mixer draws the composited scene into (a front camera mirrored there only).
  * Changing the `mixer` prop moves the surface to the other mixer;
  * several previews may share one mixer.
  */
 @DoNotStrip
 @Keep
-class HybridPreviewView(context: ThemedReactContext) : HybridPreviewViewSpec(), VideoMixer.PreviewTarget {
+class HybridRtmpPreviewView(context: ThemedReactContext) : HybridRtmpPreviewViewSpec(), VideoMixer.PreviewTarget {
   private val textureView = TextureView(context).apply {
     isOpaque = true
     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
       override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
         previewTexture = surface
-        attachedMixer?.videoMixer?.addPreview(this@HybridPreviewView)
+        attachedMixer?.videoMixer?.addPreview(this@HybridRtmpPreviewView)
       }
 
       override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
@@ -30,7 +30,7 @@ class HybridPreviewView(context: ThemedReactContext) : HybridPreviewViewSpec(), 
       }
 
       override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-        attachedMixer?.videoMixer?.removePreview(this@HybridPreviewView)  // blocks until released
+        attachedMixer?.videoMixer?.removePreview(this@HybridRtmpPreviewView)  // blocks until released
         previewTexture = null
         return true
       }

@@ -32,16 +32,6 @@
         "implementationClassName": "HybridMixer"
       }
     },
-    "CameraSource": {
-      "ios": {
-        "language": "swift",
-        "implementationClassName": "HybridCameraSource"
-      },
-      "android": {
-        "language": "kotlin",
-        "implementationClassName": "HybridCameraSource"
-      }
-    },
     "MicrophoneSource": {
       "ios": {
         "language": "swift",
@@ -62,18 +52,28 @@
         "implementationClassName": "HybridImageLayer"
       }
     },
-    "PreviewView": {
+    "CameraLayer": {
       "ios": {
         "language": "swift",
-        "implementationClassName": "HybridPreviewView"
+        "implementationClassName": "HybridCameraLayer"
       },
       "android": {
         "language": "kotlin",
-        "implementationClassName": "HybridPreviewView"
+        "implementationClassName": "HybridCameraLayer"
+      }
+    },
+    "RtmpPreviewView": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridRtmpPreviewView"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridRtmpPreviewView"
       }
     }
   },
   "ignorePaths": [
-    "node_modules"
+    "**/node_modules"
   ]
 }

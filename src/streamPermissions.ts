@@ -1,24 +1,20 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import { RtmpCaptureError } from './errors';
 
+/**
+ * The microphone permission, when audio is on. The camera is VisionCamera's:
+ * request it there (`useCameraPermission`) before the session starts.
+ */
 export async function requestStreamPermissions(audio: boolean): Promise<void> {
-  // iOS sources request access themselves. Android sources only check it.
-  if (Platform.OS !== 'android') return;
-  const permissions = audio
-    ? [
-        PermissionsAndroid.PERMISSIONS.CAMERA,
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-      ]
-    : [PermissionsAndroid.PERMISSIONS.CAMERA];
-  const results = await PermissionsAndroid.requestMultiple(permissions);
-  if (
-    permissions.some(
-      (permission) => results[permission] !== PermissionsAndroid.RESULTS.GRANTED
-    )
-  ) {
+  // The iOS microphone source requests access itself. Android sources only check it.
+  if (!audio || Platform.OS !== 'android') return;
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+  );
+  if (result !== PermissionsAndroid.RESULTS.GRANTED) {
     throw new RtmpCaptureError(
       'permissionDenied',
-      'Camera or microphone permission was denied.'
+      'Microphone permission was denied.'
     );
   }
 }

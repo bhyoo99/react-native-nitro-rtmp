@@ -52,6 +52,9 @@ target_compile_options(mediaserver PRIVATE -w)
 set_target_properties(mediaserver PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 find_library(LOG_LIB log)
+# VisionCamera's prefab: the CameraOutput spec `CameraLayer.output` returns
+# (<VisionCamera/HybridCameraOutputSpec.hpp>, <VisionCamera/JHybridCameraOutputSpec.hpp>).
+find_package(react-native-vision-camera REQUIRED)
 
 # Link all libraries together
 target_link_libraries(
@@ -59,4 +62,5 @@ target_link_libraries(
         ${LOG_LIB}
         android # <-- Android core
         mediaserver # <-- vendored ireader/media-server
+        react-native-vision-camera::VisionCamera # <-- CameraOutput base spec
 )

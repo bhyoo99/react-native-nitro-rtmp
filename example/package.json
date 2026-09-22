@@ -9,7 +9,9 @@
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-nitro-modules": "^0.37.1"
+    "react-native-nitro-image": "^0.15.2",
+    "react-native-nitro-modules": "^0.37.1",
+    "react-native-vision-camera": "^5.2.3"
   },
   "scripts": {
     "start": "expo start --dev-client",

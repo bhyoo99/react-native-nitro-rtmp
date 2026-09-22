@@ -4,7 +4,7 @@ import NitroModules
 import QuartzCore
 import UIKit
 
-/// The UIView behind `PreviewView`: a `CAMetalLayer` the compositor draws
+/// The UIView behind `RtmpPreviewView`: a `CAMetalLayer` the compositor draws
 /// into on the render queue.
 final class PreviewUIView: UIView {
   override class var layerClass: AnyClass { CAMetalLayer.self }
@@ -39,9 +39,9 @@ final class PreviewUIView: UIView {
   }
 }
 
-/// The `PreviewView` HybridView: shows the mixer's scene as it is sent, with
-/// the front camera mirrored. Several previews may share one mixer.
-final class HybridPreviewView: HybridPreviewViewSpec, PreviewTarget {
+/// The `RtmpPreviewView` HybridView: shows the mixer's scene as it is sent, with
+/// a front camera mirrored. Several previews may share one mixer.
+final class HybridRtmpPreviewView: HybridRtmpPreviewViewSpec, PreviewTarget {
   let view: PreviewUIView = PreviewUIView(frame: .zero)
   private let lock = NSLock()
   private var attachedMixer: HybridMixer?
@@ -56,7 +56,7 @@ final class HybridPreviewView: HybridPreviewViewSpec, PreviewTarget {
     previous?.videoMixer.queue.async { previous?.videoMixer.purgePreviews() }
   }
 
-  // MARK: - HybridPreviewViewSpec
+  // MARK: - HybridRtmpPreviewViewSpec
 
   var mixer: (any HybridMixerSpec)? {
     get {

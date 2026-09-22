@@ -1,7 +1,7 @@
 {
   "name": "react-native-nitro-rtmp",
   "version": "0.3.0",
-  "description": "RTMP/RTMPS live streaming for React Native: camera, microphone, overlay layers and hardware H.264/AAC encoding on Nitro Modules",
+  "description": "RTMP/RTMPS live streaming for React Native on Nitro Modules: a VisionCamera output, microphone, overlay layers and hardware H.264/AAC encoding",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
@@ -53,6 +53,7 @@
     "streaming",
     "broadcast",
     "camera",
+    "vision-camera",
     "h264",
     "aac",
     "nitro-modules",
@@ -95,7 +96,9 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-builder-bob": "^0.43.1",
+    "react-native-nitro-image": "^0.15.2",
     "react-native-nitro-modules": "^0.37.1",
+    "react-native-vision-camera": "5.2.3",
     "release-it": "^21.0.1",
     "turbo": "^2.10.8",
     "typescript": "^6.0.3"
@@ -103,7 +106,8 @@
   "peerDependencies": {
     "react": "*",
     "react-native": "*",
-    "react-native-nitro-modules": "^0.37.1"
+    "react-native-nitro-modules": "^0.37.1",
+    "react-native-vision-camera": "^5.2.3"
   },
   "workspaces": [
     "example"

@@ -1,5 +1,5 @@
 import { Asset } from 'expo-asset';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   StyleSheet,
@@ -16,6 +16,12 @@ import {
   type Mixer,
   type PublisherState,
 } from 'react-native-nitro-rtmp';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  type TargetCameraPosition,
+} from 'react-native-vision-camera';
 
 import watermarkAsset from '../assets/watermark.png';
 import {
@@ -42,19 +48,23 @@ export default function LiveScreen({
 }: {
   onSwitchToFixture: () => void;
 }) {
+  // The camera is VisionCamera's: its permission, device and session. The
+  // stream only adds an output to it.
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const [position, setPosition] = useState<TargetCameraPosition>('back');
+  const device = useCameraDevice(position);
   const stream = useRtmpStream({ statsIntervalMs: 500 });
   const {
     state,
     ready,
     isBusy: busy,
-    camera: position,
     muted,
     error,
     stats,
     mixer,
+    cameraOutput,
     start: startPublishing,
     stop: stopPublishing,
-    flipCamera: flip,
     setMuted,
   } = stream;
   const publisherStats = stats?.publisher;
@@ -73,6 +83,9 @@ export default function LiveScreen({
     setLog((previous) => [...previous.slice(-7), `${timestamp()} ${line}`]);
   }, []);
 
+  useEffect(() => {
+    if (!hasPermission) requestPermission().catch(console.warn);
+  }, [hasPermission, requestPermission]);
   useEffect(() => {
     append(`state: ${state}`);
   }, [state, append]);
@@ -145,9 +158,9 @@ export default function LiveScreen({
   }, [stopPublishing, append]);
 
   const flipCamera = useCallback(() => {
-    flip();
+    setPosition((current) => (current === 'back' ? 'front' : 'back'));
     append('camera flipped');
-  }, [flip, append]);
+  }, [append]);
 
   const toggleMute = useCallback(
     (value: boolean) => {
@@ -225,9 +238,24 @@ export default function LiveScreen({
   }, [ready, start, stop, append, flipCamera, toggleMute, toggleWatermark]);
 
   const active = ACTIVE_STATES.includes(state);
+  const outputs = useMemo(
+    () => (cameraOutput ? [cameraOutput] : []),
+    [cameraOutput]
+  );
 
   return (
     <View style={styles.container}>
+      {device && hasPermission ? (
+        // VisionCamera owns the camera; the stream's output is one of its outputs.
+        // Its own preview stays hidden: RtmpPreview shows the composited scene.
+        <Camera
+          style={styles.camera}
+          device={device}
+          isActive
+          outputs={outputs}
+          onError={(failure) => append(`camera error: ${failure.message}`)}
+        />
+      ) : null}
       <RtmpPreview style={styles.preview} stream={stream} resizeMode="cover" />
       <View style={styles.top}>
         <View style={styles.row}>
@@ -304,6 +332,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  camera: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
   },
   preview: {
     position: 'absolute',
