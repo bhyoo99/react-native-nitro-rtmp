@@ -1,4 +1,4 @@
-![Nitro RTMP — Live streaming for React Native](.github/assets/readme-banner.png)
+![Nitro RTMP — The live-streaming output for VisionCamera](.github/assets/readme-banner.png)
 
 # react-native-nitro-rtmp
 
