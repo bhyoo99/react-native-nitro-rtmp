@@ -37,7 +37,7 @@ describe('requestStreamPermissions', () => {
     });
   });
 
-  it('leaves iOS permission handling to the native sources', async () => {
+  it('leaves the iOS microphone permission to the native source', async () => {
     Platform.OS = 'ios';
     const request = jest.spyOn(PermissionsAndroid, 'request');
     await requestStreamPermissions(true);
