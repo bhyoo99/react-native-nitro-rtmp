@@ -4,7 +4,7 @@ import {
   RtmpStreamController,
   type StreamConfiguration,
 } from '../RtmpStreamController';
-import type { CameraSource } from '../specs/CameraSource.nitro';
+import type { CameraLayer } from '../specs/CameraLayer.nitro';
 import type { MicrophoneSource } from '../specs/MicrophoneSource.nitro';
 import type { CaptureError, Mixer } from '../specs/Mixer.nitro';
 import type {
@@ -35,9 +35,10 @@ function fixture() {
   let publisherError: (error: PublisherError) => void = () => {};
   let captureError: (error: CaptureError) => void = () => {};
   const camera = {
-    position: 'back',
-    start: jest.fn<() => Promise<void>>().mockResolvedValue(),
-    stop: jest.fn<() => Promise<void>>().mockResolvedValue(),
+    kind: 'camera',
+    output: { mediaType: 'video' },
+    isFrontCamera: false,
+    dispose: jest.fn(),
   };
   const mic = {
     muted: false,
@@ -69,13 +70,13 @@ function fixture() {
     }),
   };
   const dependencies = {
-    createCameraSource: jest.fn(() => camera as unknown as CameraSource),
+    createCameraLayer: jest.fn(() => camera as unknown as CameraLayer),
     createMicrophoneSource: jest.fn(() => mic as unknown as MicrophoneSource),
     createMixer: jest.fn(() => mixer as unknown as Mixer),
     createPublisher: jest.fn(() => publisher as unknown as RtmpPublisher),
     requestPermissions: jest.fn<() => Promise<void>>().mockResolvedValue(),
   };
-  const controller = new RtmpStreamController(dependencies, 'back');
+  const controller = new RtmpStreamController(dependencies);
   return {
     controller,
     dependencies,
@@ -94,24 +95,47 @@ afterEach(() => {
 });
 
 describe('RtmpStreamController', () => {
-  it('does not allocate native resources until activated, and previews without publishing', async () => {
-    const { controller, dependencies, publisher, camera, mic } = fixture();
+  it('does not allocate native resources until activated, then exposes the camera output without publishing', async () => {
+    const { controller, dependencies, publisher, camera, mixer, mic } =
+      fixture();
     expect(dependencies.createMixer).not.toHaveBeenCalled();
     await controller.activate(CONFIG);
-    expect(camera.start).toHaveBeenCalledTimes(1);
+    expect(mixer.addLayer).toHaveBeenCalledWith(camera);
     expect(mic.start).toHaveBeenCalledTimes(1);
     expect(publisher.start).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toMatchObject({
       ready: true,
       state: 'idle',
+      cameraOutput: camera.output,
+      mixer,
     });
     await controller.deactivate();
   });
 
+  it('exposes the camera output before the microphone has started', async () => {
+    const { controller, camera, mic } = fixture();
+    const pending = deferred();
+    const micStarted = deferred();
+    mic.start.mockImplementationOnce(() => {
+      micStarted.resolve();
+      return pending.promise;
+    });
+    const prepare = controller.activate(CONFIG);
+    await micStarted.promise;
+    expect(controller.getSnapshot()).toMatchObject({
+      ready: false,
+      cameraOutput: camera.output,
+    });
+    pending.resolve();
+    await prepare;
+    expect(controller.getSnapshot().ready).toBe(true);
+    await controller.deactivate();
+  });
+
   it('waits for capture readiness before publishing', async () => {
-    const { controller, camera, publisher } = fixture();
+    const { controller, mic, publisher } = fixture();
     const capture = deferred();
-    camera.start.mockReturnValueOnce(capture.promise);
+    mic.start.mockReturnValueOnce(capture.promise);
     controller.activate(CONFIG);
     const start = controller.start('rtmp://localhost/live/test');
     expect(publisher.start).not.toHaveBeenCalled();
@@ -126,23 +150,26 @@ describe('RtmpStreamController', () => {
     await controller.deactivate();
   });
 
-  it('stops only publishing and supports another start with the same preview', async () => {
-    const { controller, camera, mic, publisher } = fixture();
+  it('stops only publishing and supports another start with the same camera output', async () => {
+    const { controller, camera, mic, mixer, publisher } = fixture();
     await controller.activate(CONFIG);
+    const output = controller.getSnapshot().cameraOutput;
     await controller.start('rtmp://localhost/live/first');
     await controller.stop();
     expect(controller.getSnapshot()).toMatchObject({
       ready: true,
       state: 'stopped',
+      cameraOutput: output,
     });
-    expect(camera.stop).not.toHaveBeenCalled();
+    expect(camera.dispose).not.toHaveBeenCalled();
+    expect(mixer.removeLayer).not.toHaveBeenCalled();
     expect(mic.stop).not.toHaveBeenCalled();
     await controller.start('rtmp://localhost/live/second');
     expect(publisher.start).toHaveBeenCalledTimes(2);
     await controller.deactivate();
   });
 
-  it('does not start anything after unmounting during a permission prompt', async () => {
+  it('does not create anything after unmounting during a permission prompt', async () => {
     const { controller, dependencies } = fixture();
     const permissions = deferred();
     const requested = deferred();
@@ -155,63 +182,46 @@ describe('RtmpStreamController', () => {
     const cleanup = controller.deactivate();
     permissions.resolve();
     await cleanup;
-    expect(dependencies.createCameraSource).not.toHaveBeenCalled();
+    expect(dependencies.createCameraLayer).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toMatchObject({
       ready: false,
       mixer: undefined,
+      cameraOutput: undefined,
     });
   });
 
-  it('stops a camera that finishes starting after unmount, without starting the microphone', async () => {
-    const { controller, camera, mic } = fixture();
-    const started = deferred();
-    const capture = deferred();
-    camera.start.mockImplementationOnce(() => {
-      started.resolve();
-      return capture.promise;
-    });
-    controller.activate(CONFIG);
-    await started.promise;
-    const cleanup = controller.deactivate();
-    capture.resolve();
-    await cleanup;
-    expect(camera.stop).toHaveBeenCalled();
-    expect(mic.start).not.toHaveBeenCalled();
-    expect(controller.getSnapshot().ready).toBe(false);
-  });
-
-  it('stops a running camera immediately while microphone startup is pending', async () => {
-    const { controller, camera, mic } = fixture();
+  it('drops the camera output immediately and releases the layer once a pending microphone start settles', async () => {
+    const { controller, camera, mic, mixer } = fixture();
     const pending = deferred();
     const micStarted = deferred();
-    const cameraStopped = deferred();
     mic.start.mockImplementationOnce(() => {
       micStarted.resolve();
       return pending.promise;
     });
-    camera.stop.mockImplementation(() => {
-      cameraStopped.resolve();
-      return Promise.resolve();
-    });
     controller.activate(CONFIG);
     await micStarted.promise;
     const cleanup = controller.deactivate();
-    await cameraStopped.promise;
-    expect(controller.getSnapshot().ready).toBe(false);
+    expect(controller.getSnapshot()).toMatchObject({
+      ready: false,
+      cameraOutput: undefined,
+    });
+    expect(camera.dispose).not.toHaveBeenCalled();
     pending.resolve();
     await cleanup;
     expect(mic.stop).toHaveBeenCalled();
+    expect(mixer.removeLayer).toHaveBeenCalledWith(camera);
+    expect(camera.dispose).toHaveBeenCalledTimes(1);
   });
 
   it('serializes cleanup and reactivation like a Strict Mode effect replay', async () => {
     const first = fixture();
     const second = fixture();
-    const { controller, dependencies, camera } = first;
+    const { controller, dependencies, mic } = first;
     await controller.activate(CONFIG);
     const stopped = deferred();
-    camera.stop.mockReturnValue(stopped.promise);
-    dependencies.createCameraSource.mockReturnValueOnce(
-      second.camera as unknown as CameraSource
+    mic.stop.mockReturnValue(stopped.promise);
+    dependencies.createCameraLayer.mockReturnValueOnce(
+      second.camera as unknown as CameraLayer
     );
     dependencies.createMicrophoneSource.mockReturnValueOnce(
       second.mic as unknown as MicrophoneSource
@@ -224,14 +234,16 @@ describe('RtmpStreamController', () => {
     );
     const cleanup = controller.deactivate();
     const next = controller.activate(CONFIG);
-    expect(second.camera.start).not.toHaveBeenCalled();
+    expect(second.mic.start).not.toHaveBeenCalled();
     stopped.resolve();
     await cleanup;
     await next;
-    expect(second.camera.start).toHaveBeenCalledTimes(1);
+    expect(first.camera.dispose).toHaveBeenCalledTimes(1);
+    expect(second.mic.start).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot()).toMatchObject({
       ready: true,
       mixer: second.mixer,
+      cameraOutput: second.camera.output,
     });
     await controller.deactivate();
   });
@@ -241,24 +253,24 @@ describe('RtmpStreamController', () => {
     controller.activate(CONFIG);
     controller.deactivate();
     await controller.activate(CONFIG);
-    expect(dependencies.createCameraSource).toHaveBeenCalledTimes(1);
+    expect(dependencies.createCameraLayer).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().ready).toBe(true);
     await controller.deactivate();
   });
 
-  it('waits for an unmounted hook to release capture before a new hook opens it', async () => {
+  it('waits for an unmounted hook to release the microphone before a new hook opens it', async () => {
     const first = fixture();
     const second = fixture();
     await first.controller.activate(CONFIG);
     const stopped = deferred();
-    first.camera.stop.mockReturnValue(stopped.promise);
+    first.mic.stop.mockReturnValue(stopped.promise);
     const cleanup = first.controller.deactivate();
     const next = second.controller.activate(CONFIG);
-    expect(second.camera.start).not.toHaveBeenCalled();
+    expect(second.mic.start).not.toHaveBeenCalled();
     stopped.resolve();
     await cleanup;
     await next;
-    expect(second.camera.start).toHaveBeenCalledTimes(1);
+    expect(second.mic.start).toHaveBeenCalledTimes(1);
     await second.controller.deactivate();
   });
 
@@ -275,10 +287,12 @@ describe('RtmpStreamController', () => {
       ready: false,
       isBusy: false,
       mixer: undefined,
+      cameraOutput: undefined,
       error: { code: 'permissionDenied' },
     });
     expect(publisher.start).not.toHaveBeenCalled();
-    expect(camera.stop).toHaveBeenCalled();
+    expect(mixer.removeLayer).toHaveBeenCalledWith(camera);
+    expect(camera.dispose).toHaveBeenCalled();
     expect(mixer.setAudioSource).toHaveBeenLastCalledWith(undefined);
     await controller.deactivate();
   });
@@ -296,7 +310,7 @@ describe('RtmpStreamController', () => {
     await controller.deactivate();
   });
 
-  it('cancels a pending publish while preserving preview initialization', async () => {
+  it('cancels a pending publish while preserving initialization', async () => {
     const { controller, dependencies, publisher } = fixture();
     const permissions = deferred();
     dependencies.requestPermissions.mockReturnValueOnce(permissions.promise);
@@ -371,22 +385,15 @@ describe('RtmpStreamController', () => {
     expect(publisher.stop).not.toHaveBeenCalled();
   });
 
-  it('updates camera and mute state without reopening capture', async () => {
-    const { controller, camera, mic } = fixture();
+  it('applies mute state before and after activation without reopening capture', async () => {
+    const { controller, mic } = fixture();
     controller.setMuted(true);
-    controller.setCameraPosition('front');
     await controller.activate(CONFIG);
     expect(mic.muted).toBe(true);
-    expect(camera.position).toBe('front');
-    controller.flipCamera();
     controller.setMuted(false);
-    expect(controller.getSnapshot()).toMatchObject({
-      camera: 'back',
-      muted: false,
-    });
-    expect(camera.position).toBe('back');
+    expect(controller.getSnapshot()).toMatchObject({ muted: false });
     expect(mic.muted).toBe(false);
-    expect(camera.start).toHaveBeenCalledTimes(1);
+    expect(mic.start).toHaveBeenCalledTimes(1);
     await controller.deactivate();
   });
 
@@ -396,6 +403,7 @@ describe('RtmpStreamController', () => {
     expect(dependencies.requestPermissions).toHaveBeenCalledWith(false);
     expect(dependencies.createMicrophoneSource).not.toHaveBeenCalled();
     expect(mixer.setAudioSource).toHaveBeenCalledWith(undefined);
+    expect(controller.getSnapshot().ready).toBe(true);
     await controller.deactivate();
   });
 
@@ -433,10 +441,10 @@ describe('RtmpStreamController', () => {
   it('cleans every resource even if stopping one fails', async () => {
     const { controller, camera, mic, mixer } = fixture();
     await controller.activate(CONFIG);
-    camera.stop.mockRejectedValue(new Error('camera stop failed'));
+    mic.stop.mockRejectedValue(new Error('microphone stop failed'));
     await controller.deactivate();
-    expect(mic.stop).toHaveBeenCalled();
     expect(mixer.removeLayer).toHaveBeenCalledWith(camera);
+    expect(camera.dispose).toHaveBeenCalled();
     expect(controller.getSnapshot().ready).toBe(false);
   });
 

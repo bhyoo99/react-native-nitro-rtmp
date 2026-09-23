@@ -14,7 +14,7 @@ protocol PreviewTarget: AnyObject {
 /// coordinates (top-left origin); nil means the whole frame.
 final class SceneLayer {
   enum Content {
-    case camera(HybridCameraSource)
+    case camera(HybridCameraLayer)
     case image(HybridImageLayer)
   }
 
@@ -168,7 +168,7 @@ final class VideoMixer {
     }
   }
 
-  /// A camera started or stopped: the timer mode may have to change.
+  /// A camera started or stopped delivering: the timer mode may have to change.
   func cameraStateChanged() {
     queue.async { [weak self] in self?.updateTimer() }
   }
@@ -186,11 +186,6 @@ final class VideoMixer {
     outputWidth = max(2, width)
     outputHeight = max(2, height)
     self.frameRate = frameRate > 0 ? frameRate : 30
-    for layer in layers {
-      if case .camera(let camera) = layer.content {
-        camera.setFrameRate(self.frameRate)
-      }
-    }
     if let timer, let interval = timerInterval() {
       timer.schedule(deadline: .now(), repeating: interval)
     }
@@ -199,9 +194,6 @@ final class VideoMixer {
   func addLayer(_ layer: SceneLayer) {
     guard !layers.contains(where: { $0.object === layer.object }) else { return }
     layers.append(layer)
-    if case .camera(let camera) = layer.content {
-      camera.setFrameRate(frameRate)
-    }
     updateTimer()
   }
 
@@ -257,7 +249,7 @@ final class VideoMixer {
   private func updateTimer() {
     let wantsFrames = encodeHandler != nil || previews.contains { $0.target != nil }
     let cameraRunning = layers.contains {
-      if case .camera(let camera) = $0.content { return camera.isRunning }
+      if case .camera(let camera) = $0.content { return camera.isReceivingFrames }
       return false
     }
     if wantsFrames && !cameraRunning {
@@ -295,7 +287,7 @@ final class VideoMixer {
         guard let frame = camera.latestFrame(), let pair = texture(for: frame.pixelBuffer) else { continue }
         keep.append(pair.1)
         draws.append(LayerDraw(texture: pair.0, frame: layer.frame, aspectFill: true,
-                               mirrorInPreview: camera.position == .front))
+                               mirrorInPreview: camera.isFrontCamera))
       case .image(let image):
         guard let texture = image.texture(for: device) else { continue }
         draws.append(LayerDraw(texture: texture, frame: layer.frame, aspectFill: false, mirrorInPreview: false))

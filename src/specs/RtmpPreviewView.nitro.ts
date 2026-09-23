@@ -5,12 +5,13 @@ export type PreviewResizeMode = 'cover' | 'contain';
 
 /**
  * Draws what the mixer sends: the composited scene,
- * mirrored only for the front camera. Several previews can share one mixer.
+ * mirrored only for a front camera. Several previews can share one mixer.
+ * (Named `RtmpPreviewView` because VisionCamera registers its own `PreviewView`.)
  */
-export interface PreviewViewProps extends HybridViewProps {
+export interface RtmpPreviewViewProps extends HybridViewProps {
   mixer?: Mixer;
   /** How the output frame fits the view. Default `cover`. */
   resizeMode?: PreviewResizeMode;
 }
 
-export type PreviewView = HybridView<PreviewViewProps>;
+export type RtmpPreviewView = HybridView<RtmpPreviewViewProps>;

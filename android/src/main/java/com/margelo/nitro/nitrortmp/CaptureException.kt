@@ -1,8 +1,8 @@
 package com.margelo.nitro.nitrortmp
 
 /**
- * Capture side failures: what `CameraSource.start()`,
- * `MicrophoneSource.start()` and `ImageLayer.load()` reject with. fbjni turns
+ * Capture side failures: what `MicrophoneSource.start()` and
+ * `ImageLayer.load()` reject with. fbjni turns
  * a Throwable into the JS Error message with `toString()`, so the message
  * reads "<code>: <message>" and the JS side turns it back into a
  * `CaptureError`. Never mixed into `PublisherError`.

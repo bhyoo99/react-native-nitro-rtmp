@@ -5,7 +5,7 @@ import { PREVIEW_VIEW_CONFIG } from '../previewViewConfig';
 
 const GENERATED = path.join(
   __dirname,
-  '../../nitrogen/generated/shared/json/PreviewViewConfig.json'
+  '../../nitrogen/generated/shared/json/RtmpPreviewViewConfig.json'
 );
 
 describe('PREVIEW_VIEW_CONFIG', () => {

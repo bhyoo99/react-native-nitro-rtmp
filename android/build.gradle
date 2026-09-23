@@ -2,7 +2,8 @@ buildscript {
   ext.NitroRtmp = [
     kotlinVersion: "2.0.21",
     minSdkVersion: 24,
-    compileSdkVersion: 36
+    compileSdkVersion: 36,
+    cameraxVersion: "1.7.0-alpha03"
   ]
 
   ext.getExtOrDefault = { prop ->
@@ -87,6 +88,8 @@ android {
     jniLibs {
       excludes += [
         "**/libc++_shared.so",
+        "**/libNitroModules.so",
+        "**/libVisionCamera.so",
         "**/libfbjni.so",
         "**/libjsi.so",
         "**/libfolly_json.so",
@@ -117,4 +120,8 @@ android {
 dependencies {
   implementation "com.facebook.react:react-android"
   implementation project(":react-native-nitro-modules")
+  // `CameraLayer.output` extends VisionCamera's CameraOutput (Kotlin base class + prefab C++ specs).
+  implementation project(":react-native-vision-camera")
+  // The CameraX `Preview` use case the output is built on; same version as VisionCamera.
+  implementation "androidx.camera:camera-core:${getExtOrDefault('cameraxVersion')}"
 }

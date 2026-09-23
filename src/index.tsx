@@ -7,7 +7,7 @@ export type {
   StreamMetadata,
 } from './specs/RtmpPublisher.nitro';
 export type { LayerKind, VideoLayer } from './specs/VideoLayer.nitro';
-export type { CameraPosition, CameraSource } from './specs/CameraSource.nitro';
+export type { CameraLayer } from './specs/CameraLayer.nitro';
 export type { MicrophoneSource } from './specs/MicrophoneSource.nitro';
 export type { ImageLayer } from './specs/ImageLayer.nitro';
 export type {
@@ -21,9 +21,9 @@ export type {
 } from './specs/Mixer.nitro';
 export type {
   PreviewResizeMode,
-  PreviewView as PreviewViewRef,
-  PreviewViewProps,
-} from './specs/PreviewView.nitro';
+  RtmpPreviewView as PreviewViewRef,
+  RtmpPreviewViewProps as PreviewViewProps,
+} from './specs/RtmpPreviewView.nitro';
 export {
   RtmpCaptureError,
   RtmpPublisherError,
@@ -35,7 +35,7 @@ export { callback } from 'react-native-nitro-modules';
 export {
   createPublisher,
   createMixer,
-  createCameraSource,
+  createCameraLayer,
   createMicrophoneSource,
   createImageLayer,
   PreviewView,

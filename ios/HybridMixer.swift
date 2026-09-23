@@ -239,7 +239,7 @@ final class HybridMixer: HybridMixerSpec {
   // MARK: - Internals
 
   private func content(of layer: any HybridVideoLayerSpec) -> SceneLayer.Content? {
-    if let camera = layer as? HybridCameraSource { return .camera(camera) }
+    if let camera = layer as? HybridCameraLayer { return .camera(camera) }
     if let image = layer as? HybridImageLayer { return .image(image) }
     return nil
   }

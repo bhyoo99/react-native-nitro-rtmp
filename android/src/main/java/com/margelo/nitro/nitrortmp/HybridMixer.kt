@@ -22,7 +22,7 @@ internal class MixerCounters {
   @Volatile var videoBitrateKbps = 0.0
 }
 
-/** What `CameraSource` and `ImageLayer` implement so the mixer can hook them up. */
+/** What `CameraLayer` and `ImageLayer` implement so the mixer can hook them up. */
 internal interface MixerLayer {
   fun attach(mixer: HybridMixer)
   fun detach()
@@ -250,7 +250,7 @@ class HybridMixer : HybridMixerSpec() {
     errorCallback?.invoke(error)
   }
 
-  private fun hasCameraLayer(): Boolean = synchronized(lock) { layers.any { it is HybridCameraSource } }
+  private fun hasCameraLayer(): Boolean = synchronized(lock) { layers.any { it is HybridCameraLayer } }
 
   private val videoListener = object : H264Encoder.Listener {
     override fun onEncodedVideo(annexb: ByteArray, presentationTimeUs: Long, keyframe: Boolean) {

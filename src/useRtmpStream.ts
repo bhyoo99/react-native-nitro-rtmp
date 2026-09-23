@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
-  createCameraSource,
+  createCameraLayer,
   createMicrophoneSource,
   createMixer,
   createPublisher,
@@ -9,14 +9,13 @@ import { RtmpStreamController } from './RtmpStreamController';
 import { requestStreamPermissions } from './streamPermissions';
 import type { RtmpStream, RtmpStreamOptions } from './streamTypes';
 
-/** Owns capture, publishing and subscriptions for a mounted React component. */
+/**
+ * Owns the camera layer, microphone, mixer and publisher for a mounted React
+ * component. The camera itself is VisionCamera's: pass `stream.cameraOutput`
+ * to its `outputs`.
+ */
 export function useRtmpStream(options: RtmpStreamOptions = {}): RtmpStream {
-  const {
-    active = true,
-    camera = 'back',
-    audio = true,
-    statsIntervalMs = 0,
-  } = options;
+  const { active = true, audio = true, statsIntervalMs = 0 } = options;
   const {
     width = 720,
     height = 1280,
@@ -32,25 +31,18 @@ export function useRtmpStream(options: RtmpStreamOptions = {}): RtmpStream {
   // Only the JS controller is allocated during render, including Strict Mode renders.
   const [controller] = useState(
     () =>
-      new RtmpStreamController(
-        {
-          createCameraSource,
-          createMicrophoneSource,
-          createMixer,
-          createPublisher,
-          requestPermissions: requestStreamPermissions,
-        },
-        camera
-      )
+      new RtmpStreamController({
+        createCameraLayer,
+        createMicrophoneSource,
+        createMixer,
+        createPublisher,
+        requestPermissions: requestStreamPermissions,
+      })
   );
   const snapshot = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot
   );
-
-  useEffect(() => {
-    controller.setCameraPosition(camera);
-  }, [controller, camera]);
 
   useEffect(() => {
     if (active)
@@ -88,8 +80,6 @@ export function useRtmpStream(options: RtmpStreamOptions = {}): RtmpStream {
     ...snapshot,
     start: controller.start,
     stop: controller.stop,
-    setCameraPosition: controller.setCameraPosition,
-    flipCamera: controller.flipCamera,
     setMuted: controller.setMuted,
   };
 }

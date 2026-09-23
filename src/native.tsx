@@ -3,11 +3,11 @@ import {
   getHostComponent,
   type HybridViewMethods,
 } from 'react-native-nitro-modules';
-import type { CameraSource } from './specs/CameraSource.nitro';
+import type { CameraLayer } from './specs/CameraLayer.nitro';
 import type { ImageLayer } from './specs/ImageLayer.nitro';
 import type { MicrophoneSource } from './specs/MicrophoneSource.nitro';
 import type { Mixer } from './specs/Mixer.nitro';
-import type { PreviewViewProps } from './specs/PreviewView.nitro';
+import type { RtmpPreviewViewProps } from './specs/RtmpPreviewView.nitro';
 import type { RtmpPublisher } from './specs/RtmpPublisher.nitro';
 import { toCaptureError, toPublisherError, wrapRejections } from './errors';
 import { PREVIEW_VIEW_CONFIG } from './previewViewConfig';
@@ -32,10 +32,12 @@ export function createMixer(): Mixer {
   return NitroModules.createHybridObject<Mixer>('Mixer');
 }
 
-/** A camera layer. `start()` rejects with a `RtmpCaptureError`. */
-export function createCameraSource(): CameraSource {
-  const camera = NitroModules.createHybridObject<CameraSource>('CameraSource');
-  return wrapRejections(camera, ['start', 'stop'], toCaptureError);
+/**
+ * A camera layer fed by VisionCamera: add it to a mixer and pass
+ * `layer.output` to VisionCamera's `outputs`.
+ */
+export function createCameraLayer(): CameraLayer {
+  return NitroModules.createHybridObject<CameraLayer>('CameraLayer');
 }
 
 /** A microphone. `start()` rejects with a `RtmpCaptureError`. */
@@ -52,10 +54,11 @@ export function createImageLayer(): ImageLayer {
 }
 
 /**
- * Draws the mixer's composited scene: what is being sent, with
- * the front camera mirrored. Pass the mixer as the `mixer` prop.
+ * Draws the mixer's composited scene: what is being sent, with a front
+ * camera mirrored. Pass the mixer as the `mixer` prop. (The native view is
+ * named `RtmpPreviewView`; VisionCamera registers its own `PreviewView`.)
  */
 export const PreviewView = getHostComponent<
-  PreviewViewProps,
+  RtmpPreviewViewProps,
   HybridViewMethods
->('PreviewView', () => PREVIEW_VIEW_CONFIG);
+>('RtmpPreviewView', () => PREVIEW_VIEW_CONFIG);

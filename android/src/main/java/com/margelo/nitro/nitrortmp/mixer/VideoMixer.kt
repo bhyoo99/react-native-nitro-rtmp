@@ -13,8 +13,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
 import android.view.Surface
-import com.margelo.nitro.nitrortmp.CameraPosition
-import com.margelo.nitro.nitrortmp.HybridCameraSource
+import com.margelo.nitro.nitrortmp.HybridCameraLayer
 import com.margelo.nitro.nitrortmp.HybridImageLayer
 import com.margelo.nitro.nitrortmp.HybridVideoLayerSpec
 import com.margelo.nitro.nitrortmp.LayerFrame
@@ -28,8 +27,9 @@ import kotlin.math.min
 
 /**
  * The GPU compositor: one render thread that
- * owns the EGL context, the camera `SurfaceTexture`s, the image textures,
- * the encoder's input window surface and every preview surface.
+ * owns the EGL context, the camera surfaces (see [CameraSurface] for their
+ * shared ownership with CameraX), the image textures, the encoder's input
+ * window surface and every preview surface.
  *
  * A camera frame arrives as `onFrameAvailable` on the render handler; the
  * render draws every layer (one quad each, z order = insertion order) into
@@ -42,7 +42,7 @@ import kotlin.math.min
  * Methods marked "posted" may be called from any thread.
  */
 internal class VideoMixer(private val counters: MixerCounters) {
-  /** What a preview view gives the mixer (HybridPreviewView implements it). */
+  /** What a preview view gives the mixer (HybridRtmpPreviewView implements it). */
   interface PreviewTarget {
     /** The `SurfaceTexture` of the TextureView; null once destroyed. */
     val previewSurfaceTexture: SurfaceTexture?
@@ -50,10 +50,8 @@ internal class VideoMixer(private val counters: MixerCounters) {
   }
 
   private class LayerSlot(val layer: HybridVideoLayerSpec, var frame: LayerFrame?) {
-    // camera
-    var surfaceTexture: SurfaceTexture? = null
-    var surface: Surface? = null
-    var oesTexture = 0
+    // camera: the surface CameraX currently draws into, until retired
+    var cameraSurface: CameraSurface? = null
     val transform = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     var bufferWidth = 0
     var bufferHeight = 0
@@ -103,6 +101,8 @@ internal class VideoMixer(private val counters: MixerCounters) {
     Matrix.scaleM(it, 0, 1f, -1f, 1f)
   }
   private val scratch = FloatArray(16)
+  private val rotate = FloatArray(16)
+  private val source = FloatArray(16)
 
   private val renderRunnable = Runnable { render(null) }
   private val timerRunnable = object : Runnable {
@@ -147,15 +147,16 @@ internal class VideoMixer(private val counters: MixerCounters) {
   // --- camera surfaces ------------------------------------------------------------------
 
   /**
-   * The Surface a camera layer captures into: a `SurfaceTexture` on an OES
-   * texture of the render context. Blocks the caller until the render
-   * thread created it (at most one second). Null when the layer is not added
-   * or the GL context could not be created.
+   * A new Surface for a camera layer to capture into: a `SurfaceTexture` on
+   * an OES texture of the render context. A previous surface of the slot is
+   * retired first (CameraX must not get the same Surface twice). Blocks the
+   * caller until the render thread created it (at most one second). Null
+   * when the layer is not added or the GL context could not be created.
    */
-  fun acquireCameraSurface(layer: HybridCameraSource, width: Int, height: Int): Surface? {
+  fun acquireCameraSurface(layer: HybridCameraLayer, width: Int, height: Int): CameraSurface? {
     if (released) return null
     if (Looper.myLooper() === handler.looper) return acquireOnRender(layer, width, height)
-    var result: Surface? = null
+    var result: CameraSurface? = null
     val latch = CountDownLatch(1)
     if (!handler.post {
         result = acquireOnRender(layer, width, height)
@@ -166,36 +167,41 @@ internal class VideoMixer(private val counters: MixerCounters) {
     return result
   }
 
-  private fun acquireOnRender(layer: HybridCameraSource, width: Int, height: Int): Surface? {
+  private fun acquireOnRender(layer: HybridCameraLayer, width: Int, height: Int): CameraSurface? {
     ensureGl() ?: return null
     val slot = layers.firstOrNull { it.layer === layer } ?: return null
+    if (slot.cameraSurface != null) retireCameraOfSlot(slot)
     slot.bufferWidth = width
     slot.bufferHeight = height
-    slot.surfaceTexture?.let { existing ->
-      existing.setDefaultBufferSize(width, height)
-      return slot.surface
-    }
-    slot.oesTexture = GlProgram.createTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
-    val st = SurfaceTexture(slot.oesTexture)
+    val oes = GlProgram.createTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
+    val st = SurfaceTexture(oes)
     st.setDefaultBufferSize(width, height)
     st.setOnFrameAvailableListener({ onFrameAvailable(slot) }, handler)
-    slot.surfaceTexture = st
-    slot.surface = Surface(st)
+    val surface = CameraSurface(Surface(st), st, oes)
+    slot.cameraSurface = surface
     slot.hasFrame = false
+    slot.frameAvailable = false
     updateTimer()
-    return slot.surface
+    return surface
   }
 
-  /** The camera closed: the layer goes dark until it starts again. Posted. */
-  fun releaseCameraSurface(layer: HybridCameraSource) = post {
+  /**
+   * Stops drawing the slot's camera surface and hands it back to the layer
+   * (`surfaceRetired`), which releases it once the camera is done with it
+   * too. With [only], nothing happens unless that surface is still the
+   * current one, so a late camera callback cannot retire its successor. Posted.
+   */
+  fun retireCameraSurface(layer: HybridCameraLayer, only: CameraSurface? = null) = post {
     val slot = layers.firstOrNull { it.layer === layer } ?: return@post
-    releaseCameraOfSlot(slot)
+    val current = slot.cameraSurface ?: return@post
+    if (only != null && only !== current) return@post
+    retireCameraOfSlot(slot)
     updateTimer()
   }
 
   /** Render thread (delivered through the handler). Queue length one. */
   private fun onFrameAvailable(slot: LayerSlot) {
-    if (released || slot.surfaceTexture == null) return
+    if (released || slot.cameraSurface == null) return
     counters.capturedFrames.incrementAndGet()
     slot.frameAvailable = true
     if (renderPending) {
@@ -324,20 +330,29 @@ internal class VideoMixer(private val counters: MixerCounters) {
     }
   }
 
-  private fun releaseCameraOfSlot(slot: LayerSlot) {
-    slot.surface?.release()
-    slot.surfaceTexture?.setOnFrameAvailableListener(null)
-    slot.surfaceTexture?.release()
-    slot.surface = null
-    slot.surfaceTexture = null
-    GlProgram.deleteTexture(slot.oesTexture)
-    slot.oesTexture = 0
+  /**
+   * Render thread. Detaches the surface's texture from the GL context and
+   * lets the layer release the Surface/SurfaceTexture when the camera has
+   * finished with them (CameraX may still be writing).
+   */
+  private fun retireCameraOfSlot(slot: LayerSlot) {
+    val surface = slot.cameraSurface ?: return
+    slot.cameraSurface = null
     slot.hasFrame = false
     slot.frameAvailable = false
+    surface.texture.setOnFrameAvailableListener(null)
+    try {
+      surface.texture.detachFromGLContext()
+    } catch (e: RuntimeException) {
+      Log.w(TAG, "detachFromGLContext failed: ${e.message}")
+    }
+    GlProgram.deleteTexture(surface.oesTexture)
+    surface.oesTexture = 0
+    (slot.layer as? HybridCameraLayer)?.surfaceRetired(surface)
   }
 
   private fun releaseSlot(slot: LayerSlot) {
-    releaseCameraOfSlot(slot)
+    retireCameraOfSlot(slot)
     GlProgram.deleteTexture(slot.texture2d)
     slot.texture2d = 0
     slot.uploadedBitmap = null
@@ -345,7 +360,7 @@ internal class VideoMixer(private val counters: MixerCounters) {
 
   /** Timer mode: no running camera, but someone wants frames. */
   private fun updateTimer() {
-    val cameraRunning = layers.any { it.surfaceTexture != null }
+    val cameraRunning = layers.any { it.cameraSurface != null }
     val wanted = !cameraRunning && (encoderSurface != null || previews.isNotEmpty())
     if (wanted == timerRunning) return
     timerRunning = wanted
@@ -359,7 +374,7 @@ internal class VideoMixer(private val counters: MixerCounters) {
     val core = egl ?: return
     var timestampNs = 0L
     for (slot in layers) {
-      val st = slot.surfaceTexture ?: continue
+      val st = slot.cameraSurface?.texture ?: continue
       if (slot.frameAvailable) {
         slot.frameAvailable = false
         try {
@@ -440,11 +455,25 @@ internal class VideoMixer(private val counters: MixerCounters) {
       if (rw <= 0f || rh <= 0f) continue
       val rectAspect = (rw * outW) / (rh * outH)
       when (val layer = slot.layer) {
-        is HybridCameraSource -> {
-          if (!slot.hasFrame || slot.oesTexture == 0) continue
+        is HybridCameraLayer -> {
+          val oesTexture = slot.cameraSurface?.oesTexture ?: 0
+          if (!slot.hasFrame || oesTexture == 0) continue
           val program = oesProgram ?: continue
+          // The surface transform usually carries the camera rotation; when
+          // CameraX says it does not, rotate what it reports about the center.
+          val extraDegrees = layer.extraRotationDegrees
+          if (extraDegrees != 0) {
+            Matrix.setIdentityM(rotate, 0)
+            Matrix.translateM(rotate, 0, 0.5f, 0.5f, 0f)
+            Matrix.rotateM(rotate, 0, extraDegrees.toFloat(), 0f, 0f, 1f)
+            Matrix.translateM(rotate, 0, -0.5f, -0.5f, 0f)
+            Matrix.multiplyMM(scratch, 0, slot.transform, 0, rotate, 0)
+            System.arraycopy(scratch, 0, source, 0, 16)
+          } else {
+            System.arraycopy(slot.transform, 0, source, 0, 16)
+          }
           // Aspect-fill: crop the (rotated) camera image around its center.
-          val rotated = abs(slot.transform[0]) < 0.01f
+          val rotated = abs(source[0]) < 0.01f
           val imageAspect = if (rotated) {
             slot.bufferHeight.toFloat() / max(1, slot.bufferWidth)
           } else {
@@ -456,13 +485,13 @@ internal class VideoMixer(private val counters: MixerCounters) {
           Matrix.setIdentityM(crop, 0)
           Matrix.translateM(crop, 0, (1f - cropW) / 2f, (1f - cropH) / 2f, 0f)
           Matrix.scaleM(crop, 0, cropW, cropH, 1f)
-          if (mirrorFront && layer.position == CameraPosition.FRONT) {
+          if (mirrorFront && layer.isFrontCamera) {
             Matrix.multiplyMM(scratch, 0, crop, 0, mirror, 0)
-            Matrix.multiplyMM(tex, 0, slot.transform, 0, scratch, 0)
+            Matrix.multiplyMM(tex, 0, source, 0, scratch, 0)
           } else {
-            Matrix.multiplyMM(tex, 0, slot.transform, 0, crop, 0)
+            Matrix.multiplyMM(tex, 0, source, 0, crop, 0)
           }
-          program.draw(slot.oesTexture, 2f * rx - 1f, 1f - 2f * (ry + rh), 2f * (rx + rw) - 1f, 1f - 2f * ry, mvp, tex)
+          program.draw(oesTexture, 2f * rx - 1f, 1f - 2f * (ry + rh), 2f * (rx + rw) - 1f, 1f - 2f * ry, mvp, tex)
         }
         is HybridImageLayer -> {
           val bitmap = layer.bitmap ?: continue

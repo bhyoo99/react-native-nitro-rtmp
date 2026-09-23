@@ -10362,6 +10362,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-nitro-image@npm:^0.15.2":
+  version: 0.15.2
+  resolution: "react-native-nitro-image@npm:0.15.2"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+    react-native-nitro-modules: "*"
+  peerDependenciesMeta:
+    react-native-nitro-modules:
+      optional: true
+  checksum: 10c0/25ac98e5bdbdaf05bfdab704e7098e54541b053e6022b03f1d3053297f84e13b876006fc4d600223fb82b322b271f74ba42fff1234dc6474b35bf244326eab0c
+  languageName: node
+  linkType: hard
+
 "react-native-nitro-modules@npm:^0.37.1":
   version: 0.37.1
   resolution: "react-native-nitro-modules@npm:0.37.1"
@@ -10384,7 +10398,9 @@ __metadata:
     react-native: "npm:0.86.3"
     react-native-builder-bob: "npm:^0.43.1"
     react-native-monorepo-config: "npm:^0.4.0"
+    react-native-nitro-image: "npm:^0.15.2"
     react-native-nitro-modules: "npm:^0.37.1"
+    react-native-vision-camera: "npm:^5.2.3"
   languageName: unknown
   linkType: soft
 
@@ -10415,7 +10431,9 @@ __metadata:
     react: "npm:19.2.3"
     react-native: "npm:0.86.3"
     react-native-builder-bob: "npm:^0.43.1"
+    react-native-nitro-image: "npm:^0.15.2"
     react-native-nitro-modules: "npm:^0.37.1"
+    react-native-vision-camera: "npm:5.2.3"
     release-it: "npm:^21.0.1"
     turbo: "npm:^2.10.8"
     typescript: "npm:^6.0.3"
@@ -10423,8 +10441,24 @@ __metadata:
     react: "*"
     react-native: "*"
     react-native-nitro-modules: ^0.37.1
+    react-native-vision-camera: ^5.2.3
   languageName: unknown
   linkType: soft
+
+"react-native-vision-camera@npm:5.2.3, react-native-vision-camera@npm:^5.2.3":
+  version: 5.2.3
+  resolution: "react-native-vision-camera@npm:5.2.3"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+    react-native-nitro-image: "*"
+    react-native-nitro-modules: "*"
+  peerDependenciesMeta:
+    react-native-nitro-modules:
+      optional: true
+  checksum: 10c0/4c55b4e2dc659f38d3247e300c1a462493ea22e3d704b61d457dcb261399a23f57418e5caa6793456a0c557999f50439a4b4143bd467b3c5bb91dbb1aee2a324
+  languageName: node
+  linkType: hard
 
 "react-native@npm:0.86.3":
   version: 0.86.3

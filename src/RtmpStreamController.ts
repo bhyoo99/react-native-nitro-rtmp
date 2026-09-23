@@ -4,7 +4,7 @@ import {
   toCaptureError,
   toPublisherError,
 } from './errors';
-import type { CameraPosition, CameraSource } from './specs/CameraSource.nitro';
+import type { CameraLayer } from './specs/CameraLayer.nitro';
 import type { MicrophoneSource } from './specs/MicrophoneSource.nitro';
 import type { AudioSettings, Mixer, VideoSettings } from './specs/Mixer.nitro';
 import type { RtmpPublisher } from './specs/RtmpPublisher.nitro';
@@ -20,7 +20,7 @@ export interface StreamConfiguration {
 interface Dependencies {
   createPublisher(): RtmpPublisher;
   createMixer(): Mixer;
-  createCameraSource(): CameraSource;
+  createCameraLayer(): CameraLayer;
   createMicrophoneSource(): MicrophoneSource;
   requestPermissions(audio: boolean): Promise<void>;
 }
@@ -29,7 +29,7 @@ interface Session {
   prepare: Promise<void>;
   publisher?: RtmpPublisher;
   mixer?: Mixer;
-  camera?: CameraSource;
+  camera?: CameraLayer;
   mic?: MicrophoneSource;
   stopTask?: Promise<void>;
   releaseTask?: Promise<void>;
@@ -43,14 +43,14 @@ type Snapshot = Pick<
   | 'ready'
   | 'isBusy'
   | 'error'
-  | 'camera'
   | 'muted'
   | 'stats'
   | 'mixer'
+  | 'cameraOutput'
 >;
 const noop = () => {};
 // A different component may mount while the previous hook's async cleanup is pending.
-// Capture ownership must pass only after that cleanup, even across controller instances.
+// Microphone ownership must pass only after that cleanup, even across controller instances.
 let captureCleanup = Promise.resolve();
 const cancelled = () =>
   new RtmpPublisherError(
@@ -84,26 +84,27 @@ function validate(config: StreamConfiguration) {
   }
 }
 
-/** Internal lifecycle owner. Construction is pure; native objects are created after activation. */
+/**
+ * Internal lifecycle owner. Construction is pure; native objects are created
+ * after activation. The camera layer's VisionCamera output is exposed as soon
+ * as it exists so the app can hand it to its `<Camera>`.
+ */
 export class RtmpStreamController {
   private current?: Session;
   private cleanup = Promise.resolve();
   private listeners = new Set<() => void>();
   private snapshot: Snapshot;
 
-  constructor(
-    private dependencies: Dependencies,
-    camera: CameraPosition
-  ) {
+  constructor(private dependencies: Dependencies) {
     this.snapshot = {
       state: 'idle',
       ready: false,
       isBusy: false,
       error: null,
-      camera,
       muted: false,
       stats: null,
       mixer: undefined,
+      cameraOutput: undefined,
     };
   }
 
@@ -136,7 +137,12 @@ export class RtmpStreamController {
       async (error: unknown) => {
         const failure = toCaptureError(error);
         if (this.current === session) {
-          this.update({ error: failure, ready: false, mixer: undefined });
+          this.update({
+            error: failure,
+            ready: false,
+            mixer: undefined,
+            cameraOutput: undefined,
+          });
         }
         await this.release(session);
         throw failure;
@@ -157,14 +163,14 @@ export class RtmpStreamController {
 
     const publisher = (session.publisher = this.dependencies.createPublisher());
     const mixer = (session.mixer = this.dependencies.createMixer());
-    const camera = (session.camera = this.dependencies.createCameraSource());
+    const camera = (session.camera = this.dependencies.createCameraLayer());
     const mic = config.audio
       ? (session.mic = this.dependencies.createMicrophoneSource())
       : undefined;
-    camera.position = this.snapshot.camera;
     if (mic) mic.muted = this.snapshot.muted;
     mixer.video = config.video;
     mixer.audio = config.audioSettings;
+    // Added before VisionCamera sees the output, so the camera format follows the output size.
     mixer.addLayer(camera);
     mixer.setAudioSource(mic);
     publisher.setMixer(mixer);
@@ -190,10 +196,9 @@ export class RtmpStreamController {
       if (this.current === session)
         this.update({ error: new RtmpCaptureError(error.code, error.message) });
     });
-    this.update({ mixer });
+    // One stable JS object for React and VisionCamera's `outputs`.
+    this.update({ mixer, cameraOutput: camera.output });
 
-    await camera.start();
-    if (this.current !== session) return;
     if (mic) await mic.start();
     if (this.current !== session) return;
     this.update({ ready: true });
@@ -219,6 +224,7 @@ export class RtmpStreamController {
       ready: false,
       isBusy: false,
       mixer: undefined,
+      cameraOutput: undefined,
       stats: null,
       state: 'stopped',
     });
@@ -227,7 +233,6 @@ export class RtmpStreamController {
     this.cleanup = Promise.allSettled([
       session.prepare,
       stop,
-      Promise.resolve().then(() => session.camera?.stop()),
       Promise.resolve().then(() => session.mic?.stop()),
     ]).then(() => this.release(session));
     captureCleanup = Promise.allSettled([captureCleanup, this.cleanup]).then(
@@ -260,7 +265,6 @@ export class RtmpStreamController {
         Promise.resolve().then(() => session.mixer?.onError(noop)),
         Promise.resolve().then(() => session.publisher?.setMixer(undefined)),
         this.stopPublisher(session),
-        Promise.resolve().then(() => session.camera?.stop()),
         Promise.resolve().then(() => session.mic?.stop()),
       ]);
       await Promise.allSettled([
@@ -268,6 +272,11 @@ export class RtmpStreamController {
         Promise.resolve().then(() => {
           if (session.camera) session.mixer?.removeLayer(session.camera);
         }),
+      ]);
+      // The layer stops feeding its output; VisionCamera may still hold the output until
+      // the app's `outputs` prop drops it, which the cleared snapshot triggers.
+      await Promise.allSettled([
+        Promise.resolve().then(() => session.camera?.dispose()),
       ]);
     })();
     return session.releaseTask;
@@ -329,15 +338,6 @@ export class RtmpStreamController {
       if (this.current === session && version === session.publishVersion)
         this.update({ isBusy: false });
     }
-  };
-
-  setCameraPosition = (camera: CameraPosition): void => {
-    if (this.current?.camera) this.current.camera.position = camera;
-    if (camera !== this.snapshot.camera) this.update({ camera });
-  };
-
-  flipCamera = (): void => {
-    this.setCameraPosition(this.snapshot.camera === 'back' ? 'front' : 'back');
   };
 
   setMuted = (muted: boolean): void => {

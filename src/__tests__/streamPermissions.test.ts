@@ -9,33 +9,37 @@ afterEach(() => {
 });
 
 describe('requestStreamPermissions', () => {
-  it('requests only the camera for a video-only stream on Android', async () => {
+  it('requests only the microphone on Android; the camera is VisionCamera’s', async () => {
     Platform.OS = 'android';
     const request = jest
-      .spyOn(PermissionsAndroid, 'requestMultiple')
-      .mockResolvedValue({
-        [PermissionsAndroid.PERMISSIONS.CAMERA]: 'granted',
-      } as Awaited<ReturnType<typeof PermissionsAndroid.requestMultiple>>);
+      .spyOn(PermissionsAndroid, 'request')
+      .mockResolvedValue('granted');
+    await requestStreamPermissions(true);
+    expect(request).toHaveBeenCalledWith(
+      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+    );
+  });
+
+  it('requests nothing for a video-only stream', async () => {
+    Platform.OS = 'android';
+    const request = jest.spyOn(PermissionsAndroid, 'request');
     await requestStreamPermissions(false);
-    expect(request).toHaveBeenCalledWith([
-      PermissionsAndroid.PERMISSIONS.CAMERA,
-    ]);
+    expect(request).not.toHaveBeenCalled();
   });
 
   it('rejects when microphone access is permanently denied', async () => {
     Platform.OS = 'android';
-    jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValue({
-      [PermissionsAndroid.PERMISSIONS.CAMERA]: 'granted',
-      [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO]: 'never_ask_again',
-    } as Awaited<ReturnType<typeof PermissionsAndroid.requestMultiple>>);
+    jest
+      .spyOn(PermissionsAndroid, 'request')
+      .mockResolvedValue('never_ask_again');
     await expect(requestStreamPermissions(true)).rejects.toMatchObject({
       code: 'permissionDenied',
     });
   });
 
-  it('leaves iOS permission handling to the native sources', async () => {
+  it('leaves the iOS microphone permission to the native source', async () => {
     Platform.OS = 'ios';
-    const request = jest.spyOn(PermissionsAndroid, 'requestMultiple');
+    const request = jest.spyOn(PermissionsAndroid, 'request');
     await requestStreamPermissions(true);
     expect(request).not.toHaveBeenCalled();
   });
