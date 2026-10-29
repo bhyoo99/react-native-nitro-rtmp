@@ -196,18 +196,18 @@ final class RtmpCameraOutput: HybridCameraOutputSpec, NativeCameraOutput {
 
   // MARK: - Internals
 
-  /// Upright for `outputOrientation`, never mirrored.
+  /// Upright for `outputOrientation`, never mirrored. Set through
+  /// `videoOrientation`, not a fixed `videoRotationAngle`: the angle that
+  /// gives an upright portrait frame depends on the sensor (90 for the usual
+  /// landscape sensors, 0 for portrait-native ones such as the iPhone Air's
+  /// front camera), and `videoOrientation` resolves it per device, as
+  /// VisionCamera's own outputs do.
   private func applyOrientation() {
     guard let connection = output.connection(with: .video) else { return }
     lock.lock()
     let orientation = self.orientation
     lock.unlock()
-    if #available(iOS 17.0, *) {
-      let angle = RtmpCameraOutput.rotationAngle(for: orientation)
-      if connection.isVideoRotationAngleSupported(angle) {
-        connection.videoRotationAngle = angle
-      }
-    } else if connection.isVideoOrientationSupported {
+    if connection.isVideoOrientationSupported {
       connection.videoOrientation = RtmpCameraOutput.videoOrientation(for: orientation)
     }
     if connection.isVideoMirroringSupported {
@@ -243,15 +243,6 @@ final class RtmpCameraOutput: HybridCameraOutputSpec, NativeCameraOutput {
     case .down: return .portraitUpsideDown
     case .left: return .landscapeRight
     case .right: return .landscapeLeft
-    }
-  }
-
-  private static func rotationAngle(for orientation: CameraOrientation) -> CGFloat {
-    switch orientation {
-    case .up: return 90
-    case .down: return 270
-    case .left: return 0
-    case .right: return 180
     }
   }
 }
